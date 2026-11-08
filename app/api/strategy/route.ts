@@ -15,9 +15,9 @@ const actionSchema=z.object({title_ru:short,title_tm:short,area:z.enum(areas),ow
 });
 async function reference(table:string,value:string|null|undefined) { if(value && !await db().prepare(`SELECT id FROM ${table} WHERE id=?`).bind(value).first())throw new ApiError(400,'INVALID_REFERENCE'); }
 export async function GET() {try {
- const user=await identity();const tables=['actions','indicators','targets','observations','organizations','documents','reports'];
+ const user=await identity();const tables=['actions','indicators','targets','observations','organizations','documents','reports','directions'];
  const out:Record<string,unknown>={user};
- await Promise.all(tables.map(async t=>{out[t]=(await db().prepare(`SELECT * FROM ${t} ${['actions','indicators'].includes(t)?'ORDER BY number':'ORDER BY rowid'}`).all()).results;}));
+ await Promise.all(tables.map(async t=>{out[t]=(await db().prepare(`SELECT * FROM ${t} ${['actions','indicators'].includes(t)?'ORDER BY number':t==='directions'?'ORDER BY position':'ORDER BY rowid'}`).all()).results;}));
  out.audit=(await db().prepare('SELECT * FROM audit ORDER BY created_at DESC LIMIT 250').all()).results;
  out.members=user.role==='admin'?(await db().prepare('SELECT * FROM members ORDER BY name').all()).results:[];
  out.generated_at=now();return json(out);
@@ -84,6 +84,11 @@ export async function POST(request:Request) {try {
   const owner=await db().prepare("SELECT value FROM settings WHERE key='owner'").first<{value:string}>();if(data.email===owner?.value)throw new ApiError(400,'OWNER_ROLE_CHANGE');
   const before=await db().prepare('SELECT * FROM members WHERE email=?').bind(data.email).first();
   await db().batch([db().prepare('INSERT INTO members (email,name,role,updated_at) VALUES (?,?,?,?) ON CONFLICT(email) DO UPDATE SET name=excluded.name,role=excluded.role,updated_at=excluded.updated_at').bind(data.email,data.name,data.role,now()),auditStatement('members',data.email,'update',before,data,user.email)]);
+ } else if(b.type==='direction') {
+  const data=z.object({status:z.enum(statuses),action_id:nullableId,notes:long,text_ru:z.string().max(4000),source_id:nullableId,source_locator:z.string().max(300),verification:z.enum(['draft','verified'])}).parse(b.data);
+  await reference('actions',data.action_id);await reference('documents',data.source_id);
+  if(data.verification==='verified')writeAccess(user,true);
+  await updateRow('directions',id.parse(b.id),z.number().int().positive().parse(b.version),{...data,updated_at:now()},user.email);
  } else throw new ApiError(400,'UNKNOWN_OPERATION');
  return json({ok:true});
  }catch(e){return fail(e);}}

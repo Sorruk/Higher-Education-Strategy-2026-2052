@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import seedInput from './seed.json';
-const seed=seedInput as {documents:Record<string,any>[];actions:Record<string,any>[];indicators:Record<string,any>[];targets:Record<string,any>[];organizations:Record<string,any>[]};
+const seed=seedInput as {documents:Record<string,any>[];actions:Record<string,any>[];indicators:Record<string,any>[];targets:Record<string,any>[];organizations:Record<string,any>[];directions?:Record<string,any>[]};
 export class ApiError extends Error { constructor(public status: number, public code: string) { super(code); } }
 export const db = () => { if (!env.DB) throw new ApiError(503, 'DATABASE_UNAVAILABLE'); return env.DB; };
 export const now = () => new Date().toISOString();
@@ -51,8 +51,8 @@ export async function bootstrap() {
  if(owner?.value!==user.email.toLowerCase())throw new ApiError(403,'INITIALIZATION_PENDING');
  for(const [table,rows] of Object.entries(seed)) {
   for(let i=0;i<rows.length;i+=40) {
-   await database.batch(rows.slice(i,i+40).map(row=>insert(table,{...row,...(table==='documents'?{created_at:now()}:table==='actions'?{updated_at:now()}:{})},true)));
+   await database.batch(rows.slice(i,i+40).map(row=>insert(table,{...row,...(table==='documents'?{created_at:now()}:['actions','directions'].includes(table)?{updated_at:now()}:{})},true)));
   }
  }
- await database.batch([database.prepare("INSERT OR IGNORE INTO settings (key,value) VALUES ('seeded','1')"),auditStatement('system','seed','initialize',null,{actions:seed.actions.length,indicators:seed.indicators.length,source:'draft-documents'},user.email)]);
+ await database.batch([database.prepare("INSERT OR IGNORE INTO settings (key,value) VALUES ('seeded','1')"),auditStatement('system','seed','initialize',null,{actions:seed.actions.length,indicators:seed.indicators.length,directions:seed.directions?.length||0,source:'draft-documents'},user.email)]);
 }
